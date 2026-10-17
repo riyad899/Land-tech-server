@@ -1,0 +1,323 @@
+generator client {
+  provider        = "prisma-client-js"
+  previewFeatures = ["postgresqlExtensions"]
+}
+
+datasource db {
+  provider   = "postgresql"
+  url        = env("DATABASE_URL")
+  extensions = [vector]
+}
+
+enum UserRole {
+  CITIZEN
+  BUYER
+  LANDOWNER
+  REVIEWER
+  ADMIN
+}
+
+enum CaseStatus {
+  DRAFT
+  PROCESSING
+  REVIEW_REQUIRED
+  HIGH_PRIORITY
+  VERIFIED
+  COMPLETED
+}
+
+enum DocumentStatus {
+  UPLOADED
+  PROCESSING
+  PROCESSED
+  FAILED
+}
+
+enum SurveyType {
+  CS
+  SA
+  RS
+  BS
+  BRS
+  NAMZARI
+  DEED
+  MUTATION
+  OTHER
+}
+
+enum RiskSeverity {
+  INFORMATION
+  REVIEW_REQUIRED
+  HIGH_PRIORITY
+  INSUFFICIENT_DATA
+}
+
+enum FindingStatus {
+  PENDING
+  REVIEWED
+  RESOLVED
+}
+
+model User {
+  id           String    @id @default(uuid())
+  name         String
+  email        String    @unique
+  password     String?
+  role         UserRole  @default(CITIZEN)
+  avatarUrl    String?
+  phone        String?
+  googleId     String?   @unique
+  isVerified   Boolean   @default(false)
+  createdAt    DateTime  @default(now())
+  updatedAt    DateTime  @updatedAt
+
+  cases        LandCase[]
+  auditLogs    AuditLog[]
+  verificationLogs VerificationLog[]
+
+  @@map("users")
+}
+
+model LandCase {
+  id              String      @id @default(uuid())
+  caseNumber      String      @unique
+  title           String
+  description     String?
+  district        String
+  upazila         String
+  mouza           String
+  jlNumber        String?
+  primaryKhatian  String?
+  primaryDag      String?
+  status          CaseStatus  @default(PROCESSING)
+  overallRiskLevel RiskSeverity @default(INFORMATION)
+  
+  userId          String?
+  user            User?       @relation(fields: [userId], references: [id], onDelete: SetNull)
+
+  documents       LandDocument[]
+  records         ExtractedLandRecord[]
+  deeds           Deed[]
+  findings        RiskFinding[]
+  comparisons     RecordComparison[]
+  verificationLogs VerificationLog[]
+
+  createdAt       DateTime    @default(now())
+  updatedAt       DateTime    @updatedAt
+
+  @@index([district, upazila, mouza])
+  @@index([status])
+  @@map("land_cases")
+}
+
+model LandDocument {
+  id              String         @id @default(uuid())
+  landCaseId      String
+  landCase        LandCase       @relation(fields: [landCaseId], references: [id], onDelete: Cascade)
+  
+  fileName        String
+  fileUrl         String
+  fileType        String
+  fileSize        Int
+  checksumSha256  String?
+  ocrRawText      String?        @db.Text
+  status          DocumentStatus @default(UPLOADED)
+  errorMessage    String?
+  
+  uploadedBy      String?
+  createdAt       DateTime       @default(now())
+  updatedAt       DateTime       @updatedAt
+
+  records         ExtractedLandRecord[]
+
+  @@map("land_documents")
+}
+
+model ExtractedLandRecord {
+  id              String      @id @default(uuid())
+  landCaseId      String
+  landCase        LandCase    @relation(fields: [landCaseId], references: [id], onDelete: Cascade)
+  
+  documentId      String?
+  document        LandDocument? @relation(fields: [documentId], references: [id], onDelete: SetNull)
+
+  surveyType      SurveyType
+  surveyYear      String?
+  district        String
+  upazila         String
+  mouza           String
+  jlNumber        String?
+  khatianNumber   String
+  dagNumber       String
+  landAreaAcre    Float
+  landClass       String?     // e.g. নাল, ভিটি, ধানী, বাড়ি
+  ownerNames      String[]    // List of recorded owners
+  shares          String?     // e.g. ১৬ আনা or 0.50
+  transferDetails String?
+  
+  deedNumber      String?
+  deedDate        DateTime?
+  
+  sourceLabel     String?     // e.g. "খতিয়ান কপি নং ১২৪"
+  confidenceScore Float       @default(1.0)
+  isUserVerified  Boolean     @default(false)
+  rawExtractedJson Json?
+
+  createdAt       DateTime    @default(now())
+  updatedAt       DateTime    @updatedAt
+
+  @@index([surveyType, khatianNumber, dagNumber])
+  @@map("extracted_land_records")
+}
+
+model Deed {
+  id                 String       @id @default(uuid())
+  landCaseId         String
+  landCase           LandCase     @relation(fields: [landCaseId], references: [id], onDelete: Cascade)
+
+  deedNumber         String
+  deedDate           DateTime
+  subRegistryOffice  String
+  deedType           String?      // e.g. সাফ কবলা, হেবা, দানপত্র
+  sellerNames        String[]
+  buyerNames         String[]
+  landAreaAcre       Float
+  plotDagNumbers     String[]
+  considerationAmount Float?
+  rawMetadataJson    Json?
+
+  transfers          OwnershipTransfer[]
+
+  createdAt          DateTime     @default(now())
+  updatedAt          DateTime     @updatedAt
+
+  @@index([deedNumber, deedDate])
+  @@map("deeds")
+}
+
+model OwnershipTransfer {
+  id              String    @id @default(uuid())
+  deedId          String
+  deed            Deed      @relation(fields: [deedId], references: [id], onDelete: Cascade)
+
+  fromOwner       String
+  toOwner         String
+  transferredShare Float?   // In acre or portion
+  transferDate    DateTime
+  notes           String?
+
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+
+  @@map("ownership_transfers")
+}
+
+model RecordComparison {
+  id              String    @id @default(uuid())
+  landCaseId      String
+  landCase        LandCase  @relation(fields: [landCaseId], references: [id], onDelete: Cascade)
+
+  summaryBengali  String    @db.Text
+  mismatchesJson  Json      // Array of difference objects (CS vs SA vs RS vs BS)
+  matchedFields   Json?     // What matches consistently
+  status          String    @default("COMPLETED")
+
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+
+  @@map("record_comparisons")
+}
+
+model RiskFinding {
+  id              String       @id @default(uuid())
+  landCaseId      String
+  landCase        LandCase     @relation(fields: [landCaseId], references: [id], onDelete: Cascade)
+
+  ruleId          String       // e.g. "RULE_DUPLICATE_SALE", "RULE_SURVEY_AREA_MISMATCH"
+  severity        RiskSeverity
+  titleBengali    String
+  descriptionBengali String    @db.Text
+  evidenceJson    Json         // Source records, specific plots, numbers that substantiate this
+  missingInfo     String?      @db.Text
+  recommendedActionBengali String @db.Text
+  legalContext    String?      @db.Text
+  
+  status          FindingStatus @default(PENDING)
+  reviewedBy      String?
+  reviewNotes     String?
+
+  createdAt       DateTime     @default(now())
+  updatedAt       DateTime     @updatedAt
+
+  @@index([ruleId, severity])
+  @@map("risk_findings")
+}
+
+model VerificationLog {
+  id              String    @id @default(uuid())
+  landCaseId      String
+  landCase        LandCase  @relation(fields: [landCaseId], references: [id], onDelete: Cascade)
+
+  reviewerId      String?
+  reviewer        User?     @relation(fields: [reviewerId], references: [id], onDelete: SetNull)
+
+  action          String
+  notes           String?   @db.Text
+  createdAt       DateTime  @default(now())
+
+  @@map("verification_logs")
+}
+
+model AuditLog {
+  id              String    @id @default(uuid())
+  userId          String?
+  user            User?     @relation(fields: [userId], references: [id], onDelete: SetNull)
+  userEmail       String?
+  action          String
+  resource        String
+  ipAddress       String?
+  userAgent       String?
+  detailsJson     Json?
+  createdAt       DateTime  @default(now())
+
+  @@index([userId, action])
+  @@map("audit_logs")
+}
+
+model DocumentEmbedding {
+  id          String   @id @default(uuid())
+
+  chunkKey    String   @unique
+  sourceType  String
+  sourceId    String
+  sourceLabel String?
+  content     String   @db.Text
+  metadata    Json?
+
+  embedding   Unsupported("vector(2048)")
+
+  isDeleted   Boolean   @default(false)
+  deletedAt   DateTime?
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+
+  @@index([sourceType], name: "idx_document_embeddings_sourceType")
+  @@index([sourceId], name: "idx_document_embeddings_sourceId")
+  @@map("document_embeddings")
+}
+
+model LegalSource {
+  id              String    @id @default(uuid())
+  title           String
+  titleBengali    String
+  actName         String
+  sectionNumber   String?
+  category        String    // e.g. "LAND_REFORMS", "REGISTRATION", "SURVEY_PROCEDURE"
+  summaryBengali  String    @db.Text
+  fullTextBengali String    @db.Text
+  officialReference String?
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+
+  @@map("legal_sources")
+}

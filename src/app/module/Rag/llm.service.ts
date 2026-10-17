@@ -11,10 +11,6 @@ export class LLMService {
     this.model =
       envVars.RAG.OPENROUTER_LLM_MODEL ||
       "nvidia/nemotron-3-super-120b-a12b:free";
-
-    if (!this.apiKey) {
-      throw new Error("OpenRouter api key is missing in .env");
-    }
   }
 
   async generateResponse(
@@ -22,6 +18,9 @@ export class LLMService {
     context: string[] = [],
     asJson: boolean = false,
   ): Promise<string> {
+    if (!this.apiKey) {
+      throw new Error("OpenRouter api key is missing in .env");
+    }
     try {
       let fullPrompt =
         context.length > 0

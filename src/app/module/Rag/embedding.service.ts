@@ -10,13 +10,12 @@ export class EmbeddingService {
     this.embeddingModel =
       envVars.RAG.OPENROUTER_EMBEDDING_MODEL ||
       "nvidia/llama-nemotron-embed-vl-1b-v2:free";
-
-    if (!this.apikey) {
-      throw new Error("OPENROUTER_API_KEY is not set in .env");
-    }
   }
 
   async generateEmbedding(text: string): Promise<number[]> {
+    if (!this.apikey) {
+      throw new Error("OPENROUTER_API_KEY is not configured.");
+    }
     try {
       const response = await fetch(`${this.apiUrl}/embeddings`, {
         method: "POST",
